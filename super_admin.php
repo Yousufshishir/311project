@@ -396,7 +396,8 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
     </div>
 
     <script>
-    // Optional: Add some client-side validation
+    // Optional:....... Add some client-side validation
+
     document.addEventListener('DOMContentLoaded', function() {
         const forms = document.querySelectorAll('form');
         forms.forEach(form => {
@@ -414,6 +415,10 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
 </body>
 
 </html>
+
+
+
+
 
 <?php
 // Close database connection
