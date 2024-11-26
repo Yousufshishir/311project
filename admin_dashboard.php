@@ -1,10 +1,39 @@
-
 <?php
+session_start(); // Start the session at the beginning of the script
+
+// Logout handling
+if (isset($_GET['logout'])) {
+    // Unset all session variables
+    $_SESSION = array();
+    
+    // Destroy the session
+    session_destroy();
+    
+    // Redirect to login page
+    header("Location: login.php");
+    exit();
+}
+
 // Database connection
 $conn = mysqli_connect('localhost', 'root', '', 'restaurant');
 
 if (!$conn) {
     die("Connection failed: " . mysqli_connect_error());
+}
+
+// Error message variable
+$error_message = '';
+$success_message = '';
+
+// Check for messages in session and clear them after display
+if (isset($_SESSION['error_message'])) {
+    $error_message = $_SESSION['error_message'];
+    unset($_SESSION['error_message']);
+}
+
+if (isset($_SESSION['success_message'])) {
+    $success_message = $_SESSION['success_message'];
+    unset($_SESSION['success_message']);
 }
 
 // Handle form submissions
@@ -14,10 +43,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $name = $_POST['category_name'];
         $display_order = $_POST['display_order'];
         
-        $sql = "INSERT INTO categories (name, display_order) VALUES (?, ?)";
-        $stmt = mysqli_prepare($conn, $sql);
-        mysqli_stmt_bind_param($stmt, "si", $name, $display_order);
-        mysqli_stmt_execute($stmt);
+        // Check if display order already exists
+        $check_order = mysqli_query($conn, "SELECT * FROM categories WHERE display_order = $display_order");
+        if (mysqli_num_rows($check_order) > 0) {
+            $_SESSION['error_message'] = "A category with this display order already exists!";
+        } else {
+            $sql = "INSERT INTO categories (name, display_order) VALUES (?, ?)";
+            $stmt = mysqli_prepare($conn, $sql);
+            mysqli_stmt_bind_param($stmt, "si", $name, $display_order);
+            
+            if (mysqli_stmt_execute($stmt)) {
+                $_SESSION['success_message'] = "Category added successfully!";
+            } else {
+                $_SESSION['error_message'] = "Error adding category: " . mysqli_error($conn);
+            }
+        }
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
     }
     // Add Menu Item
     elseif (isset($_POST['add_item'])) {
@@ -29,7 +71,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $sql = "INSERT INTO menu_items (name, description, price, category_id) VALUES (?, ?, ?, ?)";
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param($stmt, "ssdi", $name, $description, $price, $category_id);
-        mysqli_stmt_execute($stmt);
+        
+        if (mysqli_stmt_execute($stmt)) {
+            $_SESSION['success_message'] = "Menu item added successfully!";
+        } else {
+            $_SESSION['error_message'] = "Error adding menu item: " . mysqli_error($conn);
+        }
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
     }
     // Update Order Status
     elseif (isset($_POST['update_order_status'])) {
@@ -39,19 +88,48 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $sql = "UPDATE orders SET status = ? WHERE id = ?";
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param($stmt, "si", $status, $order_id);
-        mysqli_stmt_execute($stmt);
+        
+        if (mysqli_stmt_execute($stmt)) {
+            $_SESSION['success_message'] = "Order status updated successfully!";
+        } else {
+            $_SESSION['error_message'] = "Error updating order status: " . mysqli_error($conn);
+        }
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit();
     }
 }
 
-// Delete operations
-if (isset($_GET['delete_category'])) {
+// Delete operations with confirmation handling
+$confirm_delete = isset($_GET['confirm_delete']);
+if (isset($_GET['delete_category']) && $confirm_delete) {
     $category_id = $_GET['delete_category'];
-    mysqli_query($conn, "DELETE FROM categories WHERE id = $category_id");
+    
+    // First, check if category has associated menu items
+    $check_items = mysqli_query($conn, "SELECT * FROM menu_items WHERE category_id = $category_id");
+    
+    if (mysqli_num_rows($check_items) > 0) {
+        $_SESSION['error_message'] = "Cannot delete category. It contains menu items!";
+    } else {
+        if (mysqli_query($conn, "DELETE FROM categories WHERE id = $category_id")) {
+            $_SESSION['success_message'] = "Category deleted successfully!";
+        } else {
+            $_SESSION['error_message'] = "Error deleting category: " . mysqli_error($conn);
+        }
+    }
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit();
 }
 
-if (isset($_GET['delete_item'])) {
+if (isset($_GET['delete_item']) && $confirm_delete) {
     $item_id = $_GET['delete_item'];
-    mysqli_query($conn, "DELETE FROM menu_items WHERE id = $item_id");
+    
+    if (mysqli_query($conn, "DELETE FROM menu_items WHERE id = $item_id")) {
+        $_SESSION['success_message'] = "Menu item deleted successfully!";
+    } else {
+        $_SESSION['error_message'] = "Error deleting menu item: " . mysqli_error($conn);
+    }
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit();
 }
 
 // Fetch data
@@ -77,7 +155,7 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
     <meta charset="UTF-8">
     <title>Admin Dashboard</title>
     <style>
-    /* Basic styling */
+    /* Previous styles remain the same */
     body {
         font-family: Arial, sans-serif;
         background-color: #f4f4f9;
@@ -126,6 +204,7 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
         padding: 10px 15px;
         border: none;
         color: white;
+        cursor: pointer;
     }
 
     .btn-primary {
@@ -134,6 +213,12 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
 
     .btn-danger {
         background-color: #e74c3c;
+    }
+
+    .btn-logout {
+        background-color: #95a5a6;
+        float: right;
+        margin: 10px;
     }
 
     .status {
@@ -149,12 +234,85 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
     .status-completed {
         background-color: #2ecc71;
     }
+
+    /* New styles for messages */
+    .error-message {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 10px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+    }
+
+    .success-message {
+        background-color: #d4edda;
+        color: #155724;
+        padding: 10px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+    }
+
+    .confirmation-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .confirmation-box {
+        background: white;
+        padding: 20px;
+        border-radius: 5px;
+        text-align: center;
+    }
     </style>
+    <script>
+    function confirmDelete(type, id) {
+        // Create confirmation overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'confirmation-overlay';
+        overlay.innerHTML = `
+            <div class="confirmation-box">
+                <h3>Are you sure?</h3>
+                <p>Do you want to delete this ${type}?</p>
+                <button onclick="proceedDelete('${type}', ${id})" class="btn btn-danger">Yes, Delete</button>
+                <button onclick="cancelDelete()" class="btn btn-primary">Cancel</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    function proceedDelete(type, id) {
+        // Redirect to delete with confirmation
+        window.location.href = `?delete_${type}=${id}&confirm_delete=1`;
+    }
+
+    function cancelDelete() {
+        // Remove the confirmation overlay
+        document.querySelector('.confirmation-overlay').remove();
+    }
+    </script>
 </head>
 
 <body>
     <div class="container">
+        <a href="?logout=true" class="btn btn-logout">Logout</a>
         <h1>Admin Dashboard</h1>
+
+        <!-- Error and Success Messages -->
+        <?php if(!empty($error_message)): ?>
+        <div class="error-message"><?php echo $error_message; ?></div>
+        <?php endif; ?>
+
+        <?php if(!empty($success_message)): ?>
+        <div class="success-message"><?php echo $success_message; ?></div>
+        <?php endif; ?>
 
         <!-- Category Management -->
         <section id="categories">
@@ -176,7 +334,8 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
                     <td><?php echo htmlspecialchars($category['name']); ?></td>
                     <td><?php echo $category['display_order']; ?></td>
                     <td>
-                        <a href="?delete_category=<?php echo $category['id']; ?>" class="btn btn-danger">Delete</a>
+                        <button onclick="confirmDelete('category', <?php echo $category['id']; ?>)"
+                            class="btn btn-danger">Delete</button>
                     </td>
                 </tr>
                 <?php endwhile; ?>
@@ -215,7 +374,8 @@ $orders = mysqli_query($conn, "SELECT o.*, u.name as customer_name,
                     <td><?php echo htmlspecialchars($item['category_name']); ?></td>
                     <td>$<?php echo number_format($item['price'], 2); ?></td>
                     <td>
-                        <a href="?delete_item=<?php echo $item['id']; ?>" class="btn btn-danger">Delete</a>
+                        <button onclick="confirmDelete('item', <?php echo $item['id']; ?>)"
+                            class="btn btn-danger">Delete</button>
                     </td>
                 </tr>
                 <?php endwhile; ?>
