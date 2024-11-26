@@ -190,6 +190,5 @@ if (isset($_GET['logout'])) {
             Don't have an account? <a href="reg.php">Register here</a>
         </div>
 
-        <div class="logout-link">
-            <a href="?logout=true">Logout</a>
-        </div>
+
+    </div>

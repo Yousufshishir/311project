@@ -67,8 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit'])) {
             
             // Execute the statement
             if (mysqli_stmt_execute($stmt)) {
-                $_SESSION['message'] = "Registration successful!";
+                $_SESSION['message'] = "Registration successful! Please login.";
                 $_SESSION['message_type'] = 'success';
+                $_SESSION['redirect_to_login'] = true;
             } else {
                 $_SESSION['message'] = "Error: " . mysqli_stmt_error($stmt);
                 $_SESSION['message_type'] = 'error';
@@ -84,6 +85,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit'])) {
     
     // Close connection
     mysqli_close($conn);
+    
+    // Redirect to login page on successful registration
+    if (isset($_SESSION['redirect_to_login']) && $_SESSION['redirect_to_login'] === true) {
+        unset($_SESSION['redirect_to_login']);
+        header("Location: login.php");
+        exit();
+    }
     
     // Redirect to prevent form resubmission
     header("Location: " . $_SERVER['PHP_SELF']);
@@ -176,6 +184,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit'])) {
         color: #721c24;
         border: 1px solid #f5c6cb;
     }
+
+    .login-link {
+        margin-top: 15px;
+        font-size: 14px;
+    }
+
+    .login-link a {
+        color: #FF6347;
+        text-decoration: none;
+    }
+
+    .login-link a:hover {
+        text-decoration: underline;
+    }
     </style>
 </head>
 
@@ -190,6 +212,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit'])) {
             <input type="password" name="password" placeholder="Password" required minlength="6">
             <input type="submit" name="submit" value="Register">
         </form>
+        <div class="login-link">
+            Already have an account? <a href="login.php">Login here</a>
+        </div>
     </div>
 </body>
 
