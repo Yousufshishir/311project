@@ -316,7 +316,7 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
                                         while ($row = mysqli_fetch_assoc($admins_result)): 
                                         ?>
                             <tr class="border-b hover:bg-gray-100">
-                                <td class="py-3 px-4"><?= htmlspecialchars($row['name']) ?></td>
+                                <td class="py-3 px-4"><?= htmlspecialchars($row['Name']) ?></td>
                                 <td class="py-3 px-4"><?= htmlspecialchars($row['email']) ?></td>
                                 <td class="py-3 px-4"><?= htmlspecialchars($row['phone']) ?></td>
                                 <td class="py-3 px-4 text-center">
@@ -359,7 +359,7 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
                                         while ($row = mysqli_fetch_assoc($customers_result)): 
                                         ?>
                             <tr class="border-b hover:bg-gray-100">
-                                <td class="py-3 px-4"><?= htmlspecialchars($row['name']) ?></td>
+                                <td class="py-3 px-4"><?= htmlspecialchars($row['Name']) ?></td>
                                 <td class="py-3 px-4"><?= htmlspecialchars($row['email']) ?></td>
                                 <td class="py-3 px-4"><?= htmlspecialchars($row['phone']) ?></td>
                                 <td class="py-3 px-4 text-center">
