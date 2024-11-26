@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['place_order'])) {
     $items = $_POST['items'];
     $quantities = $_POST['quantities'];
     $total_amount = $_POST['total_amount'];
+    $payment_method = $_POST['payment_method']; // New payment method field
     
     // Check if any items are selected
     $has_items = false;
@@ -41,10 +42,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['place_order'])) {
     mysqli_begin_transaction($conn);
     
     try {
-        // Insert into orders table
-        $sql = "INSERT INTO orders (user_id, total_amount, status) VALUES (?, ?, 'pending')";
+        // Insert into orders table with payment method
+        $sql = "INSERT INTO orders (user_id, total_amount, status, payment_method) VALUES (?, ?, 'pending', ?)";
         $stmt = mysqli_prepare($conn, $sql);
-        mysqli_stmt_bind_param($stmt, "id", $user_id, $total_amount);
+        mysqli_stmt_bind_param($stmt, "ids", $user_id, $total_amount, $payment_method);
         mysqli_stmt_execute($stmt);
         
         $order_id = mysqli_insert_id($conn);
@@ -103,7 +104,7 @@ foreach ($menu_items as $item) {
 
 // Fetch user's order history with more details
 $user_id = $_SESSION['user_id'];
-$history_query = "SELECT o.id, o.total_amount, o.status, o.created_at, 
+$history_query = "SELECT o.id, o.total_amount, o.status, o.created_at, o.payment_method,
                          GROUP_CONCAT(CONCAT(mi.name, ' (', oi.quantity, ')') SEPARATOR ', ') as items 
                  FROM orders o 
                  JOIN order_items oi ON o.id = oi.order_id 
@@ -306,6 +307,50 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
         flex-direction: column;
         align-items: flex-end;
     }
+
+    .payment-methods {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .payment-method {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        cursor: pointer;
+        padding: 15px;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+    }
+
+    .payment-method img {
+        width: 80px;
+        height: 80px;
+        object-fit: contain;
+        margin-bottom: 10px;
+    }
+
+    .payment-method input[type="radio"] {
+        display: none;
+    }
+
+    .payment-method.selected,
+    .payment-method:hover {
+        border-color: var(--primary-color);
+        background-color: #f1f3f5;
+    }
+
+    .payment-method.selected::before {
+        content: '✓';
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: var(--primary-color);
+        font-weight: bold;
+    }
     </style>
 </head>
 
@@ -342,7 +387,7 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
             ">Logout</a>
         </div>
 
-        <form method="post" onsubmit="return confirm('Confirm your order?');">
+        <form method="post" onsubmit="return validateOrder();">
             <?php if (empty($categorized_menu)): ?>
             <div class="no-results">
                 <h2>No dishes found 🍽️</h2>
@@ -378,6 +423,41 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
             <?php endforeach; ?>
             <?php endif; ?>
 
+            <!-- Payment Method Selection -->
+            <div style="
+                background: var(--card-bg);
+                padding: 20px;
+                border-radius: 15px;
+                box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+                margin: 20px 0;
+            ">
+                <h2 style="
+                    text-align: center;
+                    color: var(--primary-color);
+                    margin-bottom: 20px;
+                ">Select Payment Method</h2>
+
+                <div class="payment-methods">
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="bkash" required>
+                        <img src="images/bkash.png" alt="bKash">
+                        <span>bKash</span>
+                    </label>
+
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="nagad" required>
+                        <img src="images/nagad.png" alt="Nagad">
+                        <span>Nagad</span>
+                    </label>
+
+                    <label class="payment-method">
+                        <input type="radio" name="payment_method" value="card" required>
+                        <img src="images/card.png" alt="Credit/Debit Card">
+                        <span>Credit/Debit Card</span>
+                    </label>
+                </div>
+            </div>
+
             <div class="cart-total" style="
                 background: var(--card-bg);
                 padding: 20px;
@@ -393,9 +473,10 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
             </div>
 
             <div style="text-align: center;">
-                <button type="submit" name="place_order" class="place-order-btn">Place Order</button>
+                <button type="submit" name="place_order" class="place-order-btn">Confirm Order</button>
             </div>
         </form>
+
         <!-- Order History Section -->
         <div class="order-history">
             <h2>Your Recent Orders</h2>
@@ -419,6 +500,7 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
                         padding: 5px 10px;
                         border-radius: 20px;
                         font-size: 0.8em;
+                        margin-top: 5px;
                         background-color: <?php 
                             switch($order['status']) {
                                 case 'pending':
@@ -437,6 +519,16 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
                         color: white;
                     ">
                         <?php echo ucfirst($order['status']); ?>
+                    </span>
+                    <span class="payment-method" style="
+                        padding: 5px 10px;
+                        border-radius: 20px;
+                        font-size: 0.8em;
+                        margin-top: 5px;
+                        background-color: #6A5ACD;
+                        color: white;
+                    ">
+                        <?php echo strtoupper($order['payment_method']); ?>
                     </span>
                 </div>
             </div>
@@ -458,6 +550,38 @@ $welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your 
             document.getElementById('cart-total').textContent = total.toFixed(2);
             document.getElementById('total_amount').value = total.toFixed(2);
         }
+
+        function validateOrder() {
+            // Check if any items are selected
+            const items = document.querySelectorAll('.quantity-input');
+            const hasItems = Array.from(items).some(item => parseInt(item.value) > 0);
+
+            // Check if payment method is selected
+            const paymentMethods = document.querySelectorAll('input[name="payment_method"]');
+            const paymentSelected = Array.from(paymentMethods).some(method => method.checked);
+
+            if (!hasItems) {
+                alert('Please select at least one item to place an order.');
+                return false;
+            }
+
+            if (!paymentSelected) {
+                alert('Please select a payment method.');
+                return false;
+            }
+
+            return confirm('Confirm your order?');
+        }
+
+        // Add event listeners to payment methods for visual selection
+        document.querySelectorAll('.payment-method').forEach(method => {
+            method.addEventListener('click', function() {
+                document.querySelectorAll('.payment-method').forEach(m => m.classList.remove(
+                    'selected'));
+                this.classList.add('selected');
+                this.querySelector('input[type="radio"]').checked = true;
+            });
+        });
 
         // Initialize total on page load
         window.onload = function() {
