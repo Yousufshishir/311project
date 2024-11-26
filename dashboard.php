@@ -73,12 +73,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['place_order'])) {
     exit();
 }
 
-// Fetch menu items with categories
+// Handle search and sort functionality
+$search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
+$sort_by = isset($_GET['sort']) ? $_GET['sort'] : 'name';
+$sort_order = isset($_GET['order']) ? $_GET['order'] : 'asc';
+
+// Validate sort parameters
+$allowed_sort_columns = ['name', 'price', 'category_name'];
+$sort_by = in_array($sort_by, $allowed_sort_columns) ? $sort_by : 'name';
+$sort_order = in_array(strtolower($sort_order), ['asc', 'desc']) ? strtolower($sort_order) : 'asc';
+
 $menu_query = "SELECT mi.*, c.name as category_name 
                FROM menu_items mi 
                JOIN categories c ON mi.category_id = c.id 
-               ORDER BY c.display_order, mi.name";
-$menu_result = mysqli_query($conn, $menu_query);
+               WHERE mi.name LIKE ? OR mi.description LIKE ?
+               ORDER BY $sort_by $sort_order";
+$stmt = mysqli_prepare($conn, $menu_query);
+$search_param = "%{$search_query}%";
+mysqli_stmt_bind_param($stmt, "ss", $search_param, $search_param);
+mysqli_stmt_execute($stmt);
+$menu_result = mysqli_stmt_get_result($stmt);
 $menu_items = mysqli_fetch_all($menu_result, MYSQLI_ASSOC);
 
 // Group menu items by category
@@ -87,21 +101,35 @@ foreach ($menu_items as $item) {
     $categorized_menu[$item['category_name']][] = $item;
 }
 
-// Fetch user's order history
+// Fetch user's order history with more details
 $user_id = $_SESSION['user_id'];
-$history_query = "SELECT o.*, GROUP_CONCAT(mi.name) as items 
+$history_query = "SELECT o.id, o.total_amount, o.status, o.created_at, 
+                         GROUP_CONCAT(CONCAT(mi.name, ' (', oi.quantity, ')') SEPARATOR ', ') as items 
                  FROM orders o 
                  JOIN order_items oi ON o.id = oi.order_id 
                  JOIN menu_items mi ON oi.item_id = mi.id 
                  WHERE o.user_id = ? 
                  GROUP BY o.id 
                  ORDER BY o.created_at DESC 
-                 LIMIT 5";
+                 LIMIT 10";
 $stmt = mysqli_prepare($conn, $history_query);
 mysqli_stmt_bind_param($stmt, "i", $user_id);
 mysqli_stmt_execute($stmt);
 $history_result = mysqli_stmt_get_result($stmt);
 $order_history = mysqli_fetch_all($history_result, MYSQLI_ASSOC);
+
+// Personalized welcome message
+$first_name = explode(' ', $_SESSION['user_name'])[0];
+$time_of_day = date('H');
+$greeting = 'Good ';
+if ($time_of_day < 12) {
+    $greeting .= 'Morning';
+} elseif ($time_of_day < 18) {
+    $greeting .= 'Afternoon';
+} else {
+    $greeting .= 'Evening';
+}
+$welcome_message = "$greeting, " . htmlspecialchars($first_name) . " Enjoy your Food!!";
 ?>
 
 <!DOCTYPE html>
@@ -110,275 +138,332 @@ $order_history = mysqli_fetch_all($history_result, MYSQLI_ASSOC);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Restaurant Dashboard</title>
+    <title>Culinary Canvas - Order Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-    body {
-        font-family: 'Arial', sans-serif;
-        margin: 0;
-        padding: 20px;
-        background-image: url('background.jpg');
-        background-size: cover;
-        background-attachment: fixed;
-        background-position: center;
-        background-repeat: no-repeat;
+    :root {
+        --primary-color: #6A5ACD;
+        --secondary-color: #4CAF50;
+        --bg-color: #f8f9fa;
+        --text-color: #2c3e50;
+        --card-bg: #ffffff;
     }
 
-    .dashboard-container {
-        max-width: 1200px;
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: 'Inter', sans-serif;
+        background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+        color: var(--text-color);
+        line-height: 1.6;
+    }
+
+    .container {
+        max-width: 1400px;
         margin: 0 auto;
-        background-color: rgba(255, 255, 255, 0.95);
         padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
 
     .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 30px;
-        background-color: white;
+        background: var(--card-bg);
         padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+        margin-bottom: 30px;
+    }
+
+    .welcome-message {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--primary-color);
+    }
+
+    .search-sort-container {
+        display: flex;
+        gap: 15px;
+        background: #f1f3f5;
+        padding: 10px;
         border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
     }
 
-    .welcome-text {
-        font-size: 24px;
-        color: #333;
-    }
-
-    .logout-btn {
-        background-color: #FF6347;
-        color: white;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        text-decoration: none;
+    .search-input,
+    .sort-select {
+        padding: 10px;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        font-family: 'Inter', sans-serif;
     }
 
     .menu-container {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 20px;
+        gap: 25px;
         margin-bottom: 30px;
     }
 
     .menu-item {
-        background-color: white;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        transition: transform 0.2s;
+        background: var(--card-bg);
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
     }
 
     .menu-item:hover {
-        transform: translateY(-5px);
+        transform: translateY(-10px);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
     }
 
     .menu-item img {
         width: 100%;
-        height: 200px;
+        height: 250px;
         object-fit: cover;
-        border-radius: 5px;
-        margin-bottom: 10px;
+    }
+
+    .menu-item-content {
+        padding: 15px;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
     }
 
     .menu-item h3 {
-        margin: 0 0 10px 0;
-        color: #333;
+        margin-bottom: 10px;
+        color: var(--primary-color);
+        font-weight: 600;
     }
 
     .price {
-        color: #FF6347;
+        color: var(--secondary-color);
         font-weight: bold;
         font-size: 18px;
-        margin-bottom: 10px;
+        margin-top: auto;
     }
 
     .quantity-input {
-        width: 60px;
-        padding: 5px;
-        margin-right: 10px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-    }
-
-    .order-history {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    }
-
-    .order-history h2 {
-        margin-top: 0;
-        color: #333;
-        border-bottom: 2px solid #FF6347;
-        padding-bottom: 10px;
-    }
-
-    .order-item {
-        padding: 15px 0;
-        border-bottom: 1px solid #eee;
-    }
-
-    .order-item:last-child {
-        border-bottom: none;
-    }
-
-    .message {
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        font-weight: 500;
-    }
-
-    .success {
-        background-color: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-    }
-
-    .error {
-        background-color: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
+        width: 80px;
+        padding: 8px;
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        text-align: center;
+        margin-top: 10px;
     }
 
     .place-order-btn {
-        background-color: #4CAF50;
+        background: var(--primary-color);
         color: white;
-        padding: 15px 30px;
         border: none;
-        border-radius: 5px;
+        padding: 15px 30px;
+        border-radius: 50px;
+        font-weight: 600;
         cursor: pointer;
-        font-size: 16px;
+        transition: all 0.3s ease;
         margin-top: 20px;
-        transition: background-color 0.2s;
+        align-self: center;
     }
 
-    .place-order-btn:hover {
-        background-color: #45a049;
+    .order-history {
+        background: var(--card-bg);
+        border-radius: 15px;
+        padding: 25px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        margin-top: 30px;
     }
 
-    .cart-total {
-        font-size: 24px;
-        font-weight: bold;
-        margin: 20px 0;
-        color: #333;
+    .order-history h2 {
+        margin-bottom: 20px;
+        color: var(--primary-color);
+    }
+
+    .order-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        background: #f8f9fa;
         padding: 15px;
-        background-color: white;
         border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        margin-bottom: 15px;
+        gap: 15px;
     }
 
-    .category-title {
-        margin: 30px 0 20px 0;
-        color: #333;
-        border-bottom: 2px solid #FF6347;
-        padding-bottom: 10px;
-        font-size: 24px;
+    .order-item-details {
+        display: flex;
+        flex-direction: column;
     }
 
-    .welcome-subtitle {
-        font-size: 16px;
-        color: #666;
-        margin-top: 5px;
+    .order-item-summary {
+        text-align: right;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
     }
     </style>
-    <script>
-    function updateTotal() {
-        let total = 0;
-        const items = document.querySelectorAll('.menu-item');
-
-        items.forEach(item => {
-            const quantity = parseInt(item.querySelector('.quantity-input').value) || 0;
-            const price = parseFloat(item.querySelector('.price').dataset.price);
-            total += quantity * price;
-        });
-
-        document.getElementById('cart-total').textContent = total.toFixed(2);
-        document.getElementById('total_amount').value = total.toFixed(2);
-    }
-
-    // Initialize total on page load
-    window.onload = function() {
-        updateTotal();
-    };
-    </script>
 </head>
 
 <body>
-    <div class="dashboard-container">
+    <div class="container">
         <div class="header">
-            <div class="welcome-text">
-                Welcome back, <?php echo htmlspecialchars($_SESSION['user_name']); ?>!
-                <div class="welcome-subtitle">
-                    Ready to explore our delicious menu?
-                </div>
+            <div class="welcome-message">
+                <?php echo $welcome_message; ?>
             </div>
-            <a href="logout.php" class="logout-btn">Logout</a>
+
+            <form method="GET" class="search-sort-container">
+                <input type="search" name="search" placeholder="Search dishes..." class="search-input"
+                    value="<?php echo htmlspecialchars($search_query); ?>">
+
+                <select name="sort" class="sort-select" onchange="this.form.submit()">
+                    <option value="name" <?php echo $sort_by == 'name' ? 'selected' : ''; ?>>Sort by Name</option>
+                    <option value="price" <?php echo $sort_by == 'price' ? 'selected' : ''; ?>>Sort by Price</option>
+                    <option value="category_name" <?php echo $sort_by == 'category_name' ? 'selected' : ''; ?>>Sort by
+                        Category</option>
+                </select>
+
+                <select name="order" class="sort-select" onchange="this.form.submit()">
+                    <option value="asc" <?php echo $sort_order == 'asc' ? 'selected' : ''; ?>>Ascending</option>
+                    <option value="desc" <?php echo $sort_order == 'desc' ? 'selected' : ''; ?>>Descending</option>
+                </select>
+            </form>
+
+            <a href="logout.php" style="
+                background-color: var(--primary-color);
+                color: white;
+                padding: 10px 20px;
+                text-decoration: none;
+                border-radius: 50px;
+            ">Logout</a>
         </div>
 
-        <?php
-        if (isset($_SESSION['message'])) {
-            $messageClass = ($_SESSION['message_type'] == 'success') ? 'success' : 'error';
-            echo '<div class="message ' . $messageClass . '">' . $_SESSION['message'] . '</div>';
-            unset($_SESSION['message']);
-            unset($_SESSION['message_type']);
-        }
-        ?>
-
         <form method="post" onsubmit="return confirm('Confirm your order?');">
+            <?php if (empty($categorized_menu)): ?>
+            <div class="no-results">
+                <h2>No dishes found 🍽️</h2>
+                <p>Try a different search or explore our menu.</p>
+            </div>
+            <?php else: ?>
             <?php foreach ($categorized_menu as $category => $items): ?>
-            <h2 class="category-title">
-                <?php echo htmlspecialchars($category); ?>
-            </h2>
+            <h2 style="
+                        margin: 30px 0 20px;
+                        color: var(--primary-color);
+                        border-bottom: 3px solid var(--primary-color);
+                        padding-bottom: 10px;
+                        font-size: 24px;
+                    "><?php echo htmlspecialchars($category); ?></h2>
             <div class="menu-container">
                 <?php foreach ($items as $item): ?>
                 <div class="menu-item">
                     <img src="images/<?php echo strtolower(str_replace(' ', '_', $item['name'])); ?>.jpg"
                         alt="<?php echo htmlspecialchars($item['name']); ?>">
-                    <h3><?php echo htmlspecialchars($item['name']); ?></h3>
-                    <p><?php echo htmlspecialchars($item['description']); ?></p>
-                    <div class="price" data-price="<?php echo $item['price']; ?>">
-                        $<?php echo number_format($item['price'], 2); ?>
+                    <div class="menu-item-content">
+                        <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+                        <p><?php echo htmlspecialchars($item['description']); ?></p>
+                        <div class="price" data-price="<?php echo $item['price']; ?>">
+                            $<?php echo number_format($item['price'], 2); ?>
+                        </div>
+                        <input type="number" name="quantities[]" class="quantity-input" value="0" min="0"
+                            onchange="updateTotal()">
+                        <input type="hidden" name="items[]" value="<?php echo $item['id']; ?>">
                     </div>
-                    <input type="number" name="quantities[]" class="quantity-input" value="0" min="0"
-                        onchange="updateTotal()">
-                    <input type="hidden" name="items[]" value="<?php echo $item['id']; ?>">
                 </div>
                 <?php endforeach; ?>
             </div>
             <?php endforeach; ?>
+            <?php endif; ?>
 
-            <div class="cart-total">
+            <div class="cart-total" style="
+                background: var(--card-bg);
+                padding: 20px;
+                border-radius: 15px;
+                box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+                text-align: center;
+                margin: 20px 0;
+                font-size: 24px;
+                font-weight: bold;
+            ">
                 Total: $<span id="cart-total">0.00</span>
                 <input type="hidden" name="total_amount" id="total_amount" value="0">
             </div>
 
-            <button type="submit" name="place_order" class="place-order-btn">Place Order</button>
+            <div style="text-align: center;">
+                <button type="submit" name="place_order" class="place-order-btn">Place Order</button>
+            </div>
         </form>
-
+        <!-- Order History Section -->
         <div class="order-history">
-            <h2>Recent Orders</h2>
+            <h2>Your Recent Orders</h2>
             <?php if (empty($order_history)): ?>
-            <p>No recent orders found.</p>
+            <p>You haven't placed any orders yet.</p>
             <?php else: ?>
             <?php foreach ($order_history as $order): ?>
             <div class="order-item">
-                <p>Order #<?php echo $order['id']; ?> -
-                    <?php echo date('M d, Y H:i', strtotime($order['created_at'])); ?><br>
-                    Items: <?php echo htmlspecialchars($order['items']); ?><br>
-                    Total: $<?php echo number_format($order['total_amount'], 2); ?><br>
-                    Status: <?php echo ucfirst($order['status']); ?></p>
+                <div class="order-item-details">
+                    <strong>Order #<?php echo $order['id']; ?></strong>
+                    <p><?php echo $order['items']; ?></p>
+                </div>
+                <div class="order-item-summary">
+                    <span class="order-total">
+                        Total: $<?php echo number_format($order['total_amount'], 2); ?>
+                    </span>
+                    <small class="order-date">
+                        Date: <?php echo date('F j, Y H:i', strtotime($order['created_at'])); ?>
+                    </small>
+                    <span class="badge" style="
+                        padding: 5px 10px;
+                        border-radius: 20px;
+                        font-size: 0.8em;
+                        background-color: <?php 
+                            switch($order['status']) {
+                                case 'pending':
+                                    echo '#FFC107'; // Amber
+                                    break;
+                                case 'completed':
+                                    echo '#28A745'; // Green
+                                    break;
+                                case 'cancelled':
+                                    echo '#DC3545'; // Red
+                                    break;
+                                default:
+                                    echo '#6C757D'; // Gray
+                            }
+                        ?>;
+                        color: white;
+                    ">
+                        <?php echo ucfirst($order['status']); ?>
+                    </span>
+                </div>
             </div>
             <?php endforeach; ?>
             <?php endif; ?>
         </div>
-    </div>
+
+        <script>
+        function updateTotal() {
+            let total = 0;
+            const items = document.querySelectorAll('.menu-item');
+
+            items.forEach(item => {
+                const quantity = parseInt(item.querySelector('.quantity-input').value) || 0;
+                const price = parseFloat(item.querySelector('.price').dataset.price);
+                total += quantity * price;
+            });
+
+            document.getElementById('cart-total').textContent = total.toFixed(2);
+            document.getElementById('total_amount').value = total.toFixed(2);
+        }
+
+        // Initialize total on page load
+        window.onload = function() {
+            updateTotal();
+        };
+        </script>
 </body>
 
 </html>
