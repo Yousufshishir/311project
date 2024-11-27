@@ -314,7 +314,7 @@ register_shutdown_function(function() use ($conn) {
                         <input type="text" name="phone" placeholder="Phone Number"
                             value="<?= htmlspecialchars($_SESSION['user_phone'] ?? '') ?>" required
                             class="w-full px-4 py-2 border rounded-lg">
-                        <input type="password" name="password" placeholder="New Password (min 6 characters)"
+                        <input type="password" name="password" placeholder="New Password (min 8 characters)"
                             class="w-full px-4 py-2 border rounded-lg">
                         <button type="submit" name="update_super_admin"
                             class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition duration-300">
