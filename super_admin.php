@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_super_admin']))
         $_SESSION['message'] = "Phone number already exists!";
         $_SESSION['message_type'] = 'error';
     } elseif (!empty($password) && strlen($password) < 6) {
-        $_SESSION['message'] = "Password must be at least 6 characters long!";
+        $_SESSION['message'] = "Password must be at least 8 characters long!";
         $_SESSION['message_type'] = 'error';
     } else {
         $sql = "UPDATE users SET name = ?, email = ?, phone = ?";
