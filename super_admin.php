@@ -1,41 +1,91 @@
 <?php
-session_start();
-$conn = mysqli_connect('localhost', 'root', '', 'restaurant');
+// Secure session and database management
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', 1);
 
-if (!$conn) {
-    die("Connection failed: " . mysqli_connect_error());
+// Check if session is already started
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-// Redirect to login if not logged in
-if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'super_admin') {
-    header("Location: login.php");
-    exit();
+// Secure database connection function
+function createDatabaseConnection() {
+    static $conn = null;
+    
+    if ($conn === null) {
+        $conn = mysqli_connect('localhost', 'root', '', 'restaurant');
+        
+        if (!$conn) {
+            error_log("Database Connection Failed: " . mysqli_connect_error());
+            die("Connection failed. Please check database configuration.");
+        }
+
+        // Set connection character encoding
+        mysqli_set_charset($conn, 'utf8mb4');
+    }
+    
+    return $conn;
 }
 
-// Check if this is first time setup
+// Safely close database connection
+function closeDatabaseConnection($conn) {
+    if ($conn !== null && mysqli_ping($conn)) {
+        mysqli_close($conn);
+    }
+}
+
+// Fetch database connection
+$conn = createDatabaseConnection();
+
+// Generate CSRF token if not exists
+if (!isset($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// Improved first-time setup detection
 $first_time_setup = false;
 $super_admin_check = mysqli_query($conn, "SELECT * FROM users WHERE role = 'super_admin' LIMIT 1");
 if (mysqli_num_rows($super_admin_check) == 0) {
     $first_time_setup = true;
 }
 
+// If not first-time setup, check login status
+if (!$first_time_setup) {
+    // Redirect to login if not logged in
+    if (!isset($_SESSION['logged_in']) || $_SESSION['role'] !== 'super_admin') {
+        header("Location: login.php");
+        exit();
+    }
+}
+
 // Handle first time super admin setup
 if ($first_time_setup && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['setup_super_admin'])) {
     $name = mysqli_real_escape_string($conn, $_POST['name']);
-    $email = mysqli_real_escape_string($conn, $_POST['email']);
-    $phone = mysqli_real_escape_string($conn, $_POST['phone']);
+    $email = filter_var($_POST['email'], FILTER_VALIDATE_EMAIL);
+    $phone = preg_replace('/[^0-9]/', '', $_POST['phone']); // Sanitize phone number
     $password = $_POST['password'];
+    
+    // Validation checks
+    $errors = [];
+    if (!$email) {
+        $errors[] = "Invalid email format.";
+    }
+    if (strlen($phone) < 10) {
+        $errors[] = "Invalid phone number.";
+    }
+    if (strlen($password) < 8) {
+        $errors[] = "Password must be at least 8 characters long.";
+    }
     
     // Check for duplicate phone number
     $phone_check = mysqli_query($conn, "SELECT * FROM users WHERE phone = '$phone'");
     if (mysqli_num_rows($phone_check) > 0) {
-        $_SESSION['message'] = "Phone number already exists!";
-        $_SESSION['message_type'] = 'error';
-    } elseif (strlen($password) < 6) {
-        $_SESSION['message'] = "Password must be at least 6 characters long!";
-        $_SESSION['message_type'] = 'error';
-    } else {
-        $hashed_password = password_hash($password, PASSWORD_BCRYPT);
+        $errors[] = "Phone number already exists!";
+    }
+    
+    if (empty($errors)) {
+        $hashed_password = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
         
         $sql = "INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, 'super_admin')";
         $stmt = mysqli_prepare($conn, $sql);
@@ -50,7 +100,6 @@ if ($first_time_setup && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['s
             $_SESSION['user_name'] = $name;
             $_SESSION['user_email'] = $email;
             $_SESSION['user_phone'] = $phone;
-            $first_time_setup = false;
             
             header("Location: super_admin.php");
             exit();
@@ -58,8 +107,12 @@ if ($first_time_setup && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['s
             $_SESSION['message'] = "Error creating Super Admin account!";
             $_SESSION['message_type'] = 'error';
         }
+    } else {
+        $_SESSION['message'] = implode('<br>', $errors);
+        $_SESSION['message_type'] = 'error';
     }
 }
+
 
 // Handle update for super admin information
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_super_admin'])) {
@@ -173,12 +226,14 @@ if (isset($_GET['delete_user_id']) && isset($_GET['token'])) {
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
-
-// Fetch all customers
+// Fetch all customers and admins
 $customers_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'user'");
-
-// Fetch all admins
 $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'");
+
+// Shutdown function to close database connection
+register_shutdown_function(function() use ($conn) {
+    closeDatabaseConnection($conn);
+});
 ?>
 
 <!DOCTYPE html>
@@ -214,12 +269,12 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
             <?php if (isset($_SESSION['message'])): ?>
             <div
                 class="<?= $_SESSION['message_type'] == 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' ?> p-4 rounded-lg mb-6 shadow">
-                <?= htmlspecialchars($_SESSION['message']) ?>
+                <?= $_SESSION['message'] ?>
             </div>
             <?php 
                 unset($_SESSION['message']); 
                 unset($_SESSION['message_type']); 
-                ?>
+            ?>
             <?php endif; ?>
 
             <?php if ($first_time_setup): ?>
@@ -231,9 +286,9 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
                         class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <input type="email" name="email" placeholder="Email" required
                         class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <input type="text" name="phone" placeholder="Phone Number" required
+                    <input type="tel" name="phone" placeholder="Phone Number(minimum 10 digit)" required
                         class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <input type="password" name="password" placeholder="Password (min 6 characters)" required
+                    <input type="password" name="password" placeholder="Password (min 8 characters)" required
                         class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <button type="submit" name="setup_super_admin"
                         class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition duration-300">
@@ -242,6 +297,7 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
                 </form>
             </div>
             <?php else: ?>
+
             <div class="grid md:grid-cols-2 gap-6">
                 <!-- Update Super Admin Info -->
                 <div class="bg-white rounded-lg shadow-lg p-6 card">
@@ -279,7 +335,7 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
                             class="w-full px-4 py-2 border rounded-lg">
                         <input type="text" name="admin_phone" placeholder="Admin Phone" required
                             class="w-full px-4 py-2 border rounded-lg">
-                        <input type="password" name="admin_password" placeholder="Admin Password (min 6 characters)"
+                        <input type="password" name="admin_password" placeholder="Admin Password (min 8 characters)"
                             required class="w-full px-4 py-2 border rounded-lg">
                         <button type="submit" name="add_admin"
                             class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition duration-300">
@@ -396,17 +452,15 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
     </div>
 
     <script>
-    // Optional:....... Add some client-side validation
-
     document.addEventListener('DOMContentLoaded', function() {
         const forms = document.querySelectorAll('form');
         forms.forEach(form => {
             form.addEventListener('submit', function(e) {
                 const passwordField = form.querySelector('input[type="password"]');
                 if (passwordField && passwordField.value.length > 0 && passwordField.value
-                    .length < 6) {
+                    .length < 8) {
                     e.preventDefault();
-                    alert('Password must be at least 6 characters long');
+                    alert('Password must be at least 8 characters long');
                 }
             });
         });
@@ -415,12 +469,3 @@ $admins_result = mysqli_query($conn, "SELECT * FROM users WHERE role = 'admin'")
 </body>
 
 </html>
-
-
-
-
-
-<?php
-// Close database connection
-mysqli_close($conn);
-?>
